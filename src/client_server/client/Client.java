@@ -88,8 +88,8 @@ public class Client {
         public void sendCommand() throws IOException {
 
             ConsoleHelper.writeMessage("\n--->>> What would you like to do ? \n");
-            ConsoleHelper.writeMessage("\n -> 1 - Get files list from server \n");
-            ConsoleHelper.writeMessage("\n -> 2 - Download file by name \n");
+            ConsoleHelper.writeMessage("-> 1 - Get files list from server \n");
+            ConsoleHelper.writeMessage("-> 2 - Download file by name \n");
 
             switch (ConsoleHelper.readInt()){
                 case 1 : connection.send(new Message(MessageType.FILES_LIST));
