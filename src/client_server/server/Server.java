@@ -10,7 +10,6 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.file.*;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -20,7 +19,7 @@ public class Server {
 
     private static Path directory;
     private static int port;
-    private static Map<String, Integer> fileDownloadLogger;
+    private static Map<String, Integer> fileDownloadLogger = new ConcurrentHashMap<>();;
 
     public static void main(String[] args) {
         init();
@@ -32,11 +31,6 @@ public class Server {
 
         ConsoleHelper.writeMessage("--->>> Please enter a directory for sending the files: ");
         directory = Paths.get(ConsoleHelper.readString());
-
-        // put all files in map from directory for count download events
-        fileDownloadLogger = new ConcurrentHashMap<>();
-        getFilesList(directory).stream()
-                .forEach(p -> fileDownloadLogger.put(p.getFileName().toString(), 0));
 
         try (ServerSocket serverSocket = new ServerSocket(port))
         {
@@ -79,6 +73,7 @@ public class Server {
     private static class Handler extends Thread{
 
         private Socket socket;
+        private Connection connection;
 
         public Handler(Socket socket){
             this.socket = socket;
@@ -88,7 +83,6 @@ public class Server {
         public void run() {
 
             ConsoleHelper.writeMessage("\n--->>> Got a new connection with address - " + socket.getRemoteSocketAddress());
-            Connection connection = null;
 
             try {
                 connection = new Connection(socket);
@@ -102,35 +96,43 @@ public class Server {
 
             while (true){
                 Message message = connection.receive();
+                String fileName = message.getFileName();
+                DownloadLogger.putFilesToMap();
 
-                if (message.getMessageType() == MessageType.FILES_LIST){
-                    List<String> filesNameList = new ArrayList<>();
-                    getFilesList(directory).forEach(p -> filesNameList.add(p.getFileName().toString()));
-                    connection.send(new Message(MessageType.FILES_LIST, filesNameList));
+                switch (message.getMessageType()){
+                    case FILES_LIST:
+                        sendFilesList();
+                        break;
 
-                }else if (message.getMessageType() == MessageType.FILE_BY_NAME){
-                    String fileName = message.getFileName();
-                    Path fileForSending = getFilesList(directory).stream()
-                            .filter(p -> p.getFileName().toString().equals(fileName))
-                            .findFirst()
-                            .get();
+                    case FILE_BY_NAME:
+                        sendFileByName(fileName);
+                        break;
 
-                    try(FileInputStream fis = new FileInputStream(fileForSending.toFile())) {
-                        byte[] buffer = new byte[(int) fileForSending.toFile().length()];
-                        fis.read(buffer);
-                        connection.send(new Message(MessageType.FILE_BY_NAME, fileName, buffer));
-
-                        getFilesList(directory).stream()
-                                .filter(p -> !fileDownloadLogger.containsKey(p.getFileName().toString()))
-                                .forEach(p -> fileDownloadLogger.put(p.getFileName().toString(), 0));
-
-                        fileDownloadLogger.replace(fileName, fileDownloadLogger.get(fileName) + 1);
-
-                    }
-
-                }else {
-                    ConsoleHelper.writeMessage("--->>> Can't recognize this command.");
+                    default:
+                        ConsoleHelper.writeMessage("--->>> Can't recognize this command.");
                 }
+            }
+        }
+
+        public void sendFilesList() throws IOException {
+            List<String> filesNameList = new ArrayList<>();
+            getFilesList(directory).forEach(p -> filesNameList.add(p.getFileName().toString()));
+            connection.send(new Message(MessageType.FILES_LIST, filesNameList));
+        }
+
+        public void sendFileByName(String fileName) throws IOException {
+            Path fileForSending = getFilesList(directory).stream()
+                    .filter(p -> p.getFileName().toString().equals(fileName))
+                    .findFirst()
+                    .get();
+
+            try(FileInputStream fis = new FileInputStream(fileForSending.toFile())) {
+                byte[] buffer = new byte[(int) fileForSending.toFile().length()];
+                fis.read(buffer);
+                connection.send(new Message(MessageType.FILE_BY_NAME, fileName, buffer));
+
+                fileDownloadLogger.replace(fileName, fileDownloadLogger.get(fileName) + 1);
+
             }
         }
     }
@@ -142,30 +144,41 @@ public class Server {
         public DownloadLogger(){
             ConsoleHelper.writeMessage("\n--->>> Please enter a directory for logging downloaded files : \n");
             this.LOGGER_PATH = Paths.get(ConsoleHelper.readString());
+            putFilesToMap();
         }
 
         @Override
         public void run() {
 
             while (true) {
-                try (BufferedWriter writer = Files.newBufferedWriter(LOGGER_PATH, StandardOpenOption.CREATE, StandardOpenOption.APPEND)){
-                    TimeUnit.SECONDS.sleep(30);
+                loggingDownloads();
+            }
+        }
 
-                    // for delete file content
-                    PrintWriter pw = new PrintWriter(LOGGER_PATH.toFile());
-                    pw.close();
+        public static void putFilesToMap(){
+            getFilesList(directory).stream()
+                    .filter(p -> !fileDownloadLogger.containsKey(p.getFileName().toString()))
+                    .forEach(p -> fileDownloadLogger.put(p.getFileName().toString(), 0));
+        }
 
-                    fileDownloadLogger.forEach((k, v) -> {
-                        try {
-                            writer.write(String.format("File : %s downloaded : %d times\n", k, v));
-                        } catch (IOException e) {
-                            e.printStackTrace();
-                        }
-                    });
+        private void loggingDownloads() {
+            try (BufferedWriter writer = Files.newBufferedWriter(LOGGER_PATH, StandardOpenOption.CREATE, StandardOpenOption.APPEND)){
+                TimeUnit.SECONDS.sleep(30);
 
-                } catch (InterruptedException | IOException e) {
-                    e.printStackTrace();
-                }
+                // for delete file content
+                PrintWriter pw = new PrintWriter(LOGGER_PATH.toFile());
+                pw.close();
+
+                fileDownloadLogger.forEach((k, v) -> {
+                    try {
+                        writer.write(String.format("File : %s downloaded : %d times\n", k, v));
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                    }
+                });
+
+            } catch (InterruptedException | IOException e) {
+                e.printStackTrace();
             }
         }
     }
