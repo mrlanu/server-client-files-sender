@@ -13,6 +13,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
 public class Server {
@@ -29,23 +30,25 @@ public class Server {
         ConsoleHelper.writeMessage("--->>> Please enter a Server's port : ");
         port = ConsoleHelper.readInt();
 
-        ConsoleHelper.writeMessage("--->>> Please enter a directory : ");
+        ConsoleHelper.writeMessage("--->>> Please enter a directory for sending the files: ");
         directory = Paths.get(ConsoleHelper.readString());
 
         // put all files in map from directory for count download events
-        fileDownloadLogger = new HashMap<>();
+        fileDownloadLogger = new ConcurrentHashMap<>();
         getFilesList(directory).stream()
                 .forEach(p -> fileDownloadLogger.put(p.getFileName().toString(), 0));
 
         try (ServerSocket serverSocket = new ServerSocket(port))
         {
+            DownloadLogger dl = new DownloadLogger();
+            dl.setDaemon(true);
+            dl.start();
+
             ConsoleHelper.writeMessage
                     (String.format("\n--->>> The Server has started on the port : %s, directory - %s", port, directory));
+
             while (true){
                 new Handler(serverSocket.accept()).start();
-                DownloadLogger dl = new DownloadLogger();
-               // dl.setDaemon(true);
-                dl.start();
             }
 
         } catch (IOException e) {
@@ -116,9 +119,13 @@ public class Server {
                         byte[] buffer = new byte[(int) fileForSending.toFile().length()];
                         fis.read(buffer);
                         connection.send(new Message(MessageType.FILE_BY_NAME, fileName, buffer));
+
+                        getFilesList(directory).stream()
+                                .filter(p -> !fileDownloadLogger.containsKey(p.getFileName().toString()))
+                                .forEach(p -> fileDownloadLogger.put(p.getFileName().toString(), 0));
+
                         fileDownloadLogger.replace(fileName, fileDownloadLogger.get(fileName) + 1);
-                        fileDownloadLogger
-                                .forEach((k, v) -> System.out.println(String.format("File name : %s, downloaded : %d times", k, v)));
+
                     }
 
                 }else {
@@ -133,14 +140,15 @@ public class Server {
         private final Path LOGGER_PATH;
 
         public DownloadLogger(){
-            this.LOGGER_PATH = Paths.get("c:/txt/Lanu/logger.txt");
+            ConsoleHelper.writeMessage("\n--->>> Please enter a directory for logging downloaded files : \n");
+            this.LOGGER_PATH = Paths.get(ConsoleHelper.readString());
         }
 
         @Override
         public void run() {
 
             while (true) {
-                try (BufferedWriter writer = Files.newBufferedWriter(LOGGER_PATH, StandardOpenOption.APPEND)){
+                try (BufferedWriter writer = Files.newBufferedWriter(LOGGER_PATH, StandardOpenOption.CREATE, StandardOpenOption.APPEND)){
                     TimeUnit.SECONDS.sleep(30);
 
                     // for delete file content

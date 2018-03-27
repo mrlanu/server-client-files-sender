@@ -10,7 +10,6 @@ import java.io.IOException;
 import java.net.Socket;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.text.Format;
 import java.util.List;
 
 public class Client {
